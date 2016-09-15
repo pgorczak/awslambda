@@ -195,9 +195,13 @@ def zip_tree(zf, root, prefix=''):
     '--update', '-u', multiple=True, metavar='name', default=[],
     help='Update a lambda function.')
 @click.option(
+    '--delete', '-d', multiple=True, metavar='name', default=[],
+    help='Delete a lambda function.')
+@click.option(
     '--sync', '-s', multiple=True, metavar='file', type=click.File(),
     help='Keep lambdas defined in YAML file in sync with deployed lambdas.')
-def deploy_lambda(source_dir, requirements, s3_bucket, create, update, sync):
+def deploy_lambda(source_dir, requirements, s3_bucket, create, update, delete,
+                  sync):
     """ Deploy to AWS lambda.
 
     Zips the contents of a source directory together with requirements from a
@@ -237,48 +241,44 @@ def deploy_lambda(source_dir, requirements, s3_bucket, create, update, sync):
             s3 = boto3.client('s3')
 
         with temp_s3file(s3, zf_path, s3_bucket) as (bucket, key):
-            def do_create(name, handler, role):
-                with do_thing('Creating function.'):
-                    print Lambdas.description(name, handler, role)
-                    lambda_.create_function(
-                        FunctionName=name,
-                        Runtime='python2.7',
-                        Role=role,
-                        Handler=handler,
-                        Code={'S3Bucket': bucket, 'S3Key': key}
-                    )
+            delete, create, update = map(list, (delete, create, update))
 
-            def do_update(name):
-                with do_thing('Updating function'):
-                    print lambdas.describe(name)
-                    lambda_.update_function_code(
-                        FunctionName=name,
-                        S3Bucket=bucket,
-                        S3Key=key
-                    )
-
-            def do_recreate(name, handler, role):
-                with do_thing('Deleting function'):
-                    print lambdas.describe(name)
-                    lambda_.delete_function(FunctionName=name)
-                do_create(name, handler, role)
-
-            def do_sync(f):
+            for f in sync:
                 cfg = yaml.safe_load(f)
                 for name, value in cfg.iteritems():
                     handler = value['handler']
                     role = value['role']
                     if name in lambdas:
                         if lambdas.is_equivalent(name, handler, role):
-                            do_update(name)
+                            update.append(name)
                         else:
-                            do_recreate(name, handler, role)
+                            delete.append(name)
+                            create.append((name, handler, role))
                     else:
-                        do_create(name, handler, role)
+                        create.append((name, handler, role))
 
-            map(do_create, create)
-            map(do_update, update)
-            map(do_sync, sync)
+            with do_thing('Deleting functions'):
+                for name in delete:
+                    print lambdas.describe(name)
+                    lambda_.delete_function(FunctionName=name)
+
+            with do_thing('Creating functions'):
+                for name, handler, role in create:
+                    print Lambdas.description(name, handler, role)
+                    lambda_.create_function(
+                        FunctionName=name,
+                        Runtime='python2.7',
+                        Role=role,
+                        Handler=handler,
+                        Code={'S3Bucket': bucket, 'S3Key': key})
+
+            with do_thing('Updating functions'):
+                for name in update:
+                    print lambdas.describe(name)
+                    lambda_.update_function_code(
+                        FunctionName=name,
+                        S3Bucket=bucket,
+                        S3Key=key)
 
 
 deploy_lambda()
