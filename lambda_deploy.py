@@ -1,4 +1,4 @@
-from collections import namedtuple
+import collections
 from contextlib import contextmanager
 import os
 import shutil
@@ -37,30 +37,33 @@ def do_thing(name):
     """ Logging helper.
 
     Surrounds any output in the context with name and a green OK. If an error
-    occurs, it is printed in red. Output in context is colored blue. The OK
-    message can be customized.
+    occurs, it is printed in red. Output in context is colored blue.
 
     Example:
         with do_thing('Sleeping') as result:
-            result[0] = 'Woke up.'
+            print 'Woke up.'
+        # Sleeping...
+        # Woke up.
+        # Sleeping... OK
     """
-    print '#', name
-    result = ['OK']
+    label = '# {}... '.format(name)
+    print label
     try:
         with color('34'):
-            yield result
+            yield
     except Exception as e:
         with color('31'):
             print e
         raise
     else:
+        sys.stdout.write(label)
         with color('32'):
-            print result[0]
+            print 'OK'
 
 
 class Lambdas(object):
     """ Helper class for existing lambdas. """
-    Props = namedtuple('Props', 'handler role')
+    Props = collections.namedtuple('Props', 'handler role')
 
     def __init__(self, client):
         """ Initialize with lambda client. """
@@ -88,26 +91,6 @@ class Lambdas(object):
     def description(name, handler, role):
         """ Get a string describing a function. """
         return '{} ({}) with {}'.format(name, handler, role)
-
-
-class Progress(object):
-    """ Progress callbacks for S3 upload.
-
-    Example:
-        s3.upload_file(
-            'myfile.txt', 'mybucket', 'mykey',
-            Callback=Progress(os.path.getsize('myfile.txt')),
-    """
-    def __init__(self, max_):
-        self.n = 1.0/max_
-
-    def __call__(self, dx):
-        try:
-            self.x += dx
-        except AttributeError:
-            print ''
-            self.x = dx
-        update_line('Uploading {:.0%}'.format(self.x * self.n))
 
 
 @contextmanager
@@ -139,13 +122,18 @@ def temp_s3file(client, filename, bucket):
     key = os.path.basename(filename)
     size = os.path.getsize(filename)
 
-    with do_thing('Putting code into S3: {}/{} [{:.2}MB]'.format(
-            bucket, key, 1e-6 * size)):
+    with do_thing('Putting code into S3'.format(bucket)):
+        print 'Uploading {}/{} [{:.2}MB]'.format(bucket, key, 1e-6 * size)
+
+        def cb(x):
+            sys.stdout.write('.')
+            sys.stdout.flush()
+
         client.upload_file(
             filename, bucket, key,
-            Callback=Progress(size),
+            Callback=cb,
             ExtraArgs={'ACL': 'private'})
-
+        print ''
     try:
         yield bucket, key
     finally:
@@ -169,11 +157,6 @@ def temp_zipfile():
         os.remove(path)
 
 
-def update_line(line):
-    """ Overwrite the last line of stdout. """
-    sys.stdout.write('\033[F{}\033[K\n'.format(line))
-
-
 def zip_tree(zf, root, prefix=''):
     """ Add a file tree to a zip file.
 
@@ -182,17 +165,18 @@ def zip_tree(zf, root, prefix=''):
         root: root of the zipped file tree.
         prefix: prefix of the tree within the zip file.
     """
-    print 'Packaging', root
     for path, dirs, files in os.walk(root, topdown=True):
         rel = os.path.relpath(path, root)
+        if os.path.basename(path).startswith('.'):
+            dirs[:] = []
+            continue
         for f in files:
             _, ext = os.path.splitext(f)
-            if ext not in IGNORE_EXTENSIONS:
-                update_line('Packaging '+f)
+            if ext not in IGNORE_EXTENSIONS and not f.startswith('.'):
                 filename = os.path.join(path, f)
                 arcname = os.path.join(prefix, rel, f)
+                print 'Packaging', arcname
                 zf.write(filename, arcname)
-    update_line('done')
 
 
 @click.command()
@@ -254,8 +238,8 @@ def deploy_lambda(source_dir, requirements, s3_bucket, create, update, sync):
 
         with temp_s3file(s3, zf_path, s3_bucket) as (bucket, key):
             def do_create(name, handler, role):
-                with do_thing('Creating {}'.format(Lambdas.description(
-                        name, handler, role))):
+                with do_thing('Creating function.'):
+                    print Lambdas.description(name, handler, role)
                     lambda_.create_function(
                         FunctionName=name,
                         Runtime='python2.7',
@@ -265,7 +249,8 @@ def deploy_lambda(source_dir, requirements, s3_bucket, create, update, sync):
                     )
 
             def do_update(name):
-                with do_thing('Updating {}'.format(lambdas.describe(name))):
+                with do_thing('Updating function'):
+                    print lambdas.describe(name)
                     lambda_.update_function_code(
                         FunctionName=name,
                         S3Bucket=bucket,
@@ -273,7 +258,8 @@ def deploy_lambda(source_dir, requirements, s3_bucket, create, update, sync):
                     )
 
             def do_recreate(name, handler, role):
-                with do_thing('Deleting {}'.format(lambdas.describe(name))):
+                with do_thing('Deleting function'):
+                    print lambdas.describe(name)
                     lambda_.delete_function(FunctionName=name)
                 do_create(name, handler, role)
 
@@ -282,18 +268,13 @@ def deploy_lambda(source_dir, requirements, s3_bucket, create, update, sync):
                 for name, value in cfg.iteritems():
                     handler = value['handler']
                     role = value['role']
-                    with do_thing('Syncing {}'.format(name)) as result:
-                        if name in lambdas:
-                            if lambdas.is_equivalent(name, handler, role):
-                                do = lambda: do_update(name)
-                                result[0] = 'Update...'
-                            else:
-                                do = lambda: do_recreate(name, handler, role)
-                                result[0] = 'Recreate...'
+                    if name in lambdas:
+                        if lambdas.is_equivalent(name, handler, role):
+                            do_update(name)
                         else:
-                            do = lambda: do_create(name, handler, role)
-                            result[0] = 'Create...'
-                    do()
+                            do_recreate(name, handler, role)
+                    else:
+                        do_create(name, handler, role)
 
             map(do_create, create)
             map(do_update, update)
