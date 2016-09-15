@@ -8,6 +8,7 @@ import zipfile
 
 import pip
 import boto3
+import click
 
 IGNORE_EXTENSIONS = ('.pyc',)
 
@@ -155,28 +156,32 @@ def zip_tree(zf, root, prefix=''):
     update_line('done')
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description='Deploy to AWS lambda.')
-    parser.add_argument('src', help='Source folder.')
-    parser.add_argument('reqs', help='pip requirements file.')
-    parser.add_argument('arn', help='ARN of the lambda execution role.')
-    parser.add_argument('bucket', help='S3 bucket for temporary storage.')
-    parser.add_argument(
-        '--create', action='append', nargs=2, metavar=('name', 'handler'),
-        default=[],
-        help=('Create a new lambda function. Example: --create myLambda '
-              'mymodule.myhandler'))
-    parser.add_argument(
-        '--update', action='append', metavar='name', default=[],
+@click.command(
+    help='Deploy to AWS lambda. Zips the contents of a source directory'
+         ' together with requirements from a pip-compatible file. That file is'
+         ' temporarily uploaded to an S3 bucket and used to create or update'
+         ' lambda functions.')
+@click.argument('source_dir', type=click.Path(
+    exists=True, file_okay=False, dir_okay=True, readable=True,
+    resolve_path=True))
+@click.argument('requirements', type=click.Path(
+    exists=True, file_okay=True, dir_okay=False, readable=True,
+    resolve_path=True))
+@click.argument('s3_bucket')
+@click.option(
+    '--create', '-c', multiple=True, nargs=3, metavar='name handler role_arn',
+    default=[],
+    help=('Create a new lambda function. Example: --create myLambda '
+          'mymodule.myhandler arn:aws:iam::xxxxxxxxxxxx:role/myrole'))
+@click.option(
+        '--update', '-u', multiple=True, metavar='name', default=[],
         help='Update a lambda function.')
-    args = parser.parse_args()
-
+def deploy_lambda(source_dir, requirements, s3_bucket, create, update):
     with temp_zipfile() as (zf, zf_path):
         with temp_dir() as tmp:
             with do_thing('Collecting requirements'):
                 result = pip.main([
-                    'install', '-r', args.reqs, '-t', tmp, '--isolated',
+                    'install', '-r', requirements, '-t', tmp, '--isolated',
                     '--no-compile'])
                 if result != 0:
                     raise RuntimeError
@@ -185,10 +190,7 @@ if __name__ == '__main__':
                 zip_tree(zf, tmp)
 
         with do_thing('Packaging code'):
-            src = os.path.realpath(args.src)
-            if not os.path.exists(src):
-                raise RuntimeError('Source {} does not exist.'.format(src))
-            zip_tree(zf, src)
+            zip_tree(zf, source_dir)
 
         zf.close()
 
@@ -196,21 +198,24 @@ if __name__ == '__main__':
             lambda_ = boto3.client('lambda')
             s3 = boto3.client('s3')
 
-        with temp_s3file(s3, zf_path, args.bucket) as (bucket, key):
-            for name, handler in args.create:
-                with do_thing('Creating {} ({})'.format(name, handler)):
+        with temp_s3file(s3, zf_path, s3_bucket) as (bucket, key):
+            for name, handler, role_arn in create:
+                with do_thing('Creating {} ({}) with {}'.format(
+                        name, handler, role_arn)):
                     lambda_.create_function(
                         FunctionName=name,
                         Runtime='python2.7',
-                        Role=args.arn,
+                        Role=role_arn,
                         Handler=handler,
                         Code={'S3Bucket': bucket, 'S3Key': key}
                     )
 
-            for name in args.update:
+            for name in update:
                 with do_thing('Updating {}'.format(name)):
                     lambda_.update_function_code(
                         FunctionName=name,
                         S3Bucket=bucket,
                         S3Key=key
                     )
+
+deploy_lambda()
