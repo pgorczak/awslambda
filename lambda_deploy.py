@@ -14,22 +14,26 @@ import yaml
 IGNORE_EXTENSIONS = ('.pyc',)
 
 
-@contextmanager
-def color(code):
-    """ Color code stdout.
+class ColoredStream(object):
+    """ Color code stream.
 
     See https://en.wikipedia.org/wiki/ANSI_escape_code#Colors.
     Use 31 for red, 31;1 for bright red, etc.
-
-    Example:
-        with color('31'):
-            print 'error'
     """
-    sys.stdout.write('\033[{}m'.format(code))
-    try:
-        yield
-    finally:
-        sys.stdout.write('\033[0m')
+    def __init__(self, stream, color):
+        self.__c = '\033[{}m'.format(color)
+        self.__s = stream
+        self.__l = 0
+
+    def __len__(self):
+        return self.__l
+
+    def write(self, msg):
+        self.__s.write('{}{}\033[0m'.format(self.__c, msg))
+        self.__l += len(msg)
+
+    def flush(self):
+        self.__s.flush()
 
 
 @contextmanager
@@ -46,19 +50,25 @@ def do_thing(name):
         # Woke up.
         # Sleeping... OK
     """
-    label = '# {}... '.format(name)
+    label = '[{}]'.format(name)
     print label
+    sys.stdout.flush()
+    sys.stderr.flush()
+    old_stdout, old_stderr = sys.stdout, sys.stderr
+    c_out, c_err = ColoredStream(sys.stdout, 34), ColoredStream(sys.stderr, 31)
+    sys.stdout, sys.stderr = c_out, c_err
     try:
-        with color('34'):
-            yield
-    except Exception as e:
-        with color('31'):
-            print e
+        yield
+    except:
         raise
     else:
-        sys.stdout.write(label)
-        with color('32'):
-            print 'OK'
+        if len(c_out) + len(c_err) == 0:
+            old_stdout.write('\033[F')
+        old_stdout.write('{} \033[32mOK\033[0m\n'.format(label))
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        sys.stdout, sys.stderr = old_stdout, old_stderr
 
 
 class Lambdas(object):
@@ -91,6 +101,13 @@ class Lambdas(object):
     def description(name, handler, role):
         """ Get a string describing a function. """
         return '{} ({}) with {}'.format(name, handler, role)
+
+
+def pip_install(path, requirements):
+    result = pip.main(['install', '-r', requirements, '-t', path, '--isolated',
+                       '--no-compile'])
+    if result != 0:
+        raise RuntimeError
 
 
 @contextmanager
@@ -183,30 +200,36 @@ def zip_tree(zf, root, prefix=''):
 @click.argument('source_dir', type=click.Path(
     exists=True, file_okay=False, dir_okay=True, readable=True,
     resolve_path=True))
-@click.argument('requirements', type=click.Path(
-    exists=True, file_okay=True, dir_okay=False, readable=True,
-    resolve_path=True))
 @click.argument('s3_bucket')
 @click.option(
-    '--create', '-c', multiple=True, nargs=3, metavar='name handler role',
-    default=[],
-    help='Create a new lambda function. Example: --create myLambda myrole')
+    '--requirements', '-r', type=click.Path(
+        exists=True, file_okay=True, dir_okay=False, readable=True,
+        resolve_path=True),
+    help='pip compatible requirements file. Will be included in the archive.')
 @click.option(
-    '--update', '-u', multiple=True, metavar='name', default=[],
+    '--create', '-c', multiple=True, nargs=3, metavar='NAME HANDLER ROLE',
+    default=[],
+    help='Create a new lambda function. Example:\n\n--create myLambda '
+         'mymodule.myhandler myrole')
+@click.option(
+    '--update', '-u', multiple=True, metavar='NAME', default=[],
     help='Update a lambda function.')
 @click.option(
-    '--delete', '-d', multiple=True, metavar='name', default=[],
+    '--delete', '-d', multiple=True, metavar='NAME', default=[],
     help='Delete a lambda function.')
 @click.option(
-    '--sync', '-s', multiple=True, metavar='file', type=click.File(),
+    '--sync', '-s', multiple=True, type=click.File(),
     help='Keep lambdas defined in YAML file in sync with deployed lambdas.')
-def deploy_lambda(source_dir, requirements, s3_bucket, create, update, delete,
-                  sync):
-    """ Deploy to AWS lambda.
+def deploy(source_dir, requirements, s3_bucket, create, update, delete, sync):
+    """ Deploy Python code to AWS lambda.
 
-    Zips the contents of a source directory together with requirements from a
-    pip-compatible file. That file is temporarily uploaded to an S3 bucket and
-    used to create or update lambda functions.
+    Zips the contents of the source directory together with optional pip
+    requirements. The archive is temporarily uploaded to an S3 bucket and used
+    to create or update lambda functions.
+
+    Reference handlers from your source directory like you would in any Python
+    module-tree (e.g. mymodule.myhandler, mymodule.mysubmodule.myhandler,
+    etc.).
 
     Roles are ARNs like "arn:aws:iam::xxxxxxxxxxxx:role/myrole"
 
@@ -220,15 +243,11 @@ def deploy_lambda(source_dir, requirements, s3_bucket, create, update, delete,
     """
     with temp_zipfile() as (zf, zf_path):
         with temp_dir() as tmp:
-            with do_thing('Collecting requirements'):
-                result = pip.main([
-                    'install', '-r', requirements, '-t', tmp, '--isolated',
-                    '--no-compile'])
-                if result != 0:
-                    raise RuntimeError
-
-            with do_thing('Packaging requirements'):
-                zip_tree(zf, tmp)
+            if requirements is not None:
+                with do_thing('Collecting requirements'):
+                    pip_install(tmp, requirements)
+                with do_thing('Packaging requirements'):
+                    zip_tree(zf, tmp)
 
         with do_thing('Packaging code'):
             zip_tree(zf, source_dir)
@@ -279,6 +298,3 @@ def deploy_lambda(source_dir, requirements, s3_bucket, create, update, delete,
                         FunctionName=name,
                         S3Bucket=bucket,
                         S3Key=key)
-
-
-deploy_lambda()
