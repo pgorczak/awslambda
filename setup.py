@@ -17,7 +17,7 @@ setup(
     license='GPLv3',
     author='Philipp Gorczak',
     author_email='p.gorczak@gmail.com',
-    py_modules=['lambda_deploy'],
+    py_modules=['awslambda'],
     install_requires=[
         'boto3',
         'Click',
