@@ -1,6 +1,6 @@
 from codecs import open
 from os import path
-from setuptools import setup
+from setuptools import find_packages, setup
 
 here = path.abspath(path.dirname(__file__))
 
@@ -9,7 +9,7 @@ with open(path.join(here, 'README.rst'), encoding='utf-8') as f:
 
 setup(
     name='awslambda',
-    version='1.0.0',
+    version='1.0.3',
     description='A tool for deploying Python projects to AWS Lambda.',
     long_description=long_description,
     keywords='aws lambda',
@@ -17,10 +17,10 @@ setup(
     license='GPLv3',
     author='Philipp Gorczak',
     author_email='p.gorczak@gmail.com',
-    py_modules=['awslambda'],
+    packages=find_packages(),
     install_requires=[
         'boto3',
-        'Click',
+        'click',
         'PyYAML'
     ],
     entry_points='''
