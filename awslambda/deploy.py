@@ -34,7 +34,10 @@ class ColoredStream(object):
 
     def flush(self):
         self.__s.flush()
-
+        
+    def isatty(self):
+        return self.__s.isatty()
+    
 
 @contextmanager
 def do_thing(name):
