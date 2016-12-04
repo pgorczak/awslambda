@@ -83,7 +83,7 @@ A template greeting page
 ........................
 
 Let's use the features introduced above to create a greeting page. We will use
-the `Jinja2<http://jinja.pocoo.org>`_ templating engine.
+the `Jinja2 <http://jinja.pocoo.org>`_ templating engine.
 Edit *mymodule.py*,
 
 .. code:: python
