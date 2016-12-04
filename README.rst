@@ -14,7 +14,7 @@ docs
 <http://docs.aws.amazon.com/lambda/latest/dg/with-s3-example-create-iam-role.html>`_
 (of course you need one that can execute lambdas).
 
-In a new folder, create *mymodule.py*:
+In a new folder, create *mymodule.py*.
 
 .. code:: python
 
@@ -22,13 +22,16 @@ In a new folder, create *mymodule.py*:
         return "Hello, world!"
 
 
-Then deploy the function (fill in your execution role resource name from the AWS
-console):
+Then deploy the function (fill in your execution role resource name from the
+AWS console).
 
 ::
 
     awslambda . mybucket --create hello mymodule.hello arn:aws:iam::xxxxxxxxxxxx:role/myrole
 
+
+When *awslambda* is done, you can test your new function in the Lambda
+management console.
 
 From now on, if you make changes to the function, just run:
 
@@ -37,14 +40,14 @@ From now on, if you make changes to the function, just run:
     awslambda . mybucket --update hello
 
 
-You can use as many options as you like (shown here with shorthand names):
+You can use as many options as you like (some shown here with short names).
 
 ::
 
     awslambda . mybucket -u hello -u myotherlambda --delete myoldlambda
 
 
-Or specify your functions in a YAML file (lets call it *sync.yaml*):
+Or specify your functions in a YAML file (let's call it *sync.yaml*).
 
 .. code:: yaml
 
@@ -55,28 +58,33 @@ Or specify your functions in a YAML file (lets call it *sync.yaml*):
     #     handler: myothermodule.myotherhandler
     #     role: arn:aws:iam::xxxxxxxxxxxx:role/myrole
 
-Syncing from a file, *awslambda* will update existing functions and create the
-others automatically.
+When syncing from a file, *awslambda* will update existing functions and create
+the others automatically.
 
 ::
 
     awslambda . mybucket --sync sync.yaml
 
 
-To add dependencies, use your `pip *requirements.txt*
-<https://pip.readthedocs.io/en/stable/user_guide/#requirements-files>`_:
+To add dependencies, use your `pip requirements file
+<https://pip.readthedocs.io/en/stable/user_guide/#requirements-files>`_.
 
 ::
 
     awslambda . mybucket -s sync.yaml --requirements requirements.txt
 
 
+*Note that compiled dependencies* awslambda *downloads on your local machine
+might not work on the AWS servers. Pure Python libraries should always work.
+For others, it could be helpful to run* awslambda *itself in a Lambda function.
+A process knows as* awslambdaception.
+
 A template greeting page
 ........................
 
 Let's use the features introduced above to create a greeting page. We will use
 the `Jinja2<http://jinja.pocoo.org>`_ templating engine.
-Edit *mymodule.py*
+Edit *mymodule.py*,
 
 .. code:: python
 
@@ -99,21 +107,21 @@ Edit *mymodule.py*
             'body': template.render(parameters=event['queryStringParameters'])}
 
 
-And create your simple *requirements.txt*
+and create a simple *requirements.txt*.
 
 ::
 
     Jinja2
 
 
-Deploy
+Deploy,
 
 ::
 
       awslambda . mybucket -s sync.yaml -r requirements.txt
 
 
-Open the function in your AWS console. Go to *Triggers* and add an
+then open the function in your AWS console. Go to *Triggers* and add an
 *API Gateway* trigger. Set security to *Open* for now. Open the URL of the
 created trigger in your browser. You should see "Hello, !". To customize the
 page append e.g.
@@ -123,7 +131,7 @@ page append e.g.
     ?name=Commander Shepard&message=You've received a new message at your private terminal.
 
 
-to the URL.
+to the URL and enjoy your serverless, templated webpage!
 
 
 Usage
