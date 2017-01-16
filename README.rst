@@ -77,7 +77,7 @@ To add dependencies, use your `pip requirements file
 *Note that compiled dependencies* awslambda *downloads on your local machine
 might not work on the AWS servers. Pure Python libraries should always work.
 For others, it could be helpful to run* awslambda *itself in a Lambda function.
-A process knows as* awslambdaception.
+A process known as* awslambdaception.
 
 A template greeting page
 ........................
